@@ -1,0 +1,10 @@
+# Build output
+vja
+
+# Nix direnv
+.direnv/
+.envrc
+
+# Reference material
+docs.json
+ref/

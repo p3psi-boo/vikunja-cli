@@ -49,7 +49,7 @@ func TestFormatTaskTable(t *testing.T) {
 	}
 
 	out := FormatTaskTable(tasks, map[int64]string{10: "Personal"}, now)
-	if !strings.Contains(out, "ID") || !strings.Contains(out, "Priority") || !strings.Contains(out, "Star") {
+	if !strings.Contains(out, "ID") || !strings.Contains(out, "Priority") || !strings.Contains(out, "Fav") {
 		t.Fatalf("expected task table headers, got %q", out)
 	}
 	if !strings.Contains(out, "Pay rent") {

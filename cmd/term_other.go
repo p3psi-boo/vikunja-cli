@@ -2,14 +2,10 @@
 
 package cmd
 
-import "fmt"
+import "io"
 
-// makeRawNoEcho is unsupported on this platform; promptHidden falls back to a
-// normal prompt.
-func makeRawNoEcho(fd int) (any, error) {
-	return nil, fmt.Errorf("not a supported terminal")
-}
-
-func restoreTerm(fd int, state any) error {
-	return nil
+// readPassword is unsupported on this platform; the caller falls back to an
+// echoed prompt.
+func readPassword(fd int, out io.Writer, label string) (value string, ok bool, err error) {
+	return "", false, nil
 }

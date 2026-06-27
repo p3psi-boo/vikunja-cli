@@ -87,7 +87,7 @@ username, password, and an optional TOTP passcode.`,
 				}
 			}
 			if password == "" {
-				password, err = promptHidden(reader, cmd.ErrOrStderr(), "Password")
+				password, err = promptHidden(cmd.ErrOrStderr(), "Password")
 				if err != nil {
 					return err
 				}
@@ -199,21 +199,28 @@ func promptWithDefault(reader *bufio.Reader, out io.Writer, label, def string) (
 	return value, nil
 }
 
-// promptHidden reads a line without echoing it. When the terminal cannot be
-// put into no-echo mode (e.g. piped input), it falls back to a normal prompt.
-func promptHidden(reader *bufio.Reader, out io.Writer, label string) (string, error) {
-	if state, err := makeRawNoEcho(int(os.Stdin.Fd())); err == nil {
-		defer restoreTerm(int(os.Stdin.Fd()), state)
-		if _, err := fmt.Fprintf(out, "%s: ", label); err != nil {
-			return "", err
-		}
-		value, readErr := reader.ReadString('\n')
-		fmt.Fprintln(out)
-		if readErr != nil && value == "" {
-			return "", readErr
-		}
-		return strings.TrimSpace(value), nil
+// promptHidden reads a line from stdin for password entry, echoing an asterisk
+// per typed character. It reads directly from the terminal file descriptor
+// rather than the provided bufio.Reader: that reader may have buffered bytes
+// already, and switching the tty to raw mode underneath it leaves those bytes
+// stranded.
+//
+// On platforms where raw mode is unavailable it falls back to a normal echoed
+// prompt.
+func promptHidden(out io.Writer, label string) (string, error) {
+	if value, ok, err := readPassword(int(os.Stdin.Fd()), out, label); ok {
+		return value, err
 	}
 
-	return prompt(reader, out, label)
+	// Fallback: no raw-mode support. Re-prompt on a fresh reader so we don't
+	// trip over any bytes the caller's reader already buffered.
+	if _, err := fmt.Fprintf(out, "%s: ", label); err != nil {
+		return "", err
+	}
+	reader := bufio.NewReader(os.Stdin)
+	value, readErr := reader.ReadString('\n')
+	if readErr != nil && value == "" {
+		return "", readErr
+	}
+	return strings.TrimSpace(value), nil
 }

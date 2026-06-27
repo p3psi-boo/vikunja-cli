@@ -154,6 +154,24 @@ Token file format:
 ./vja label add "backend"
 ```
 
+## Install the Agent Skill
+
+`vja skill` writes the bundled `SKILL.md` (the `managing-vikunja-tasks` skill)
+so that coding agents know how to drive `vja`. The skill is embedded in the
+binary at build time.
+
+```bash
+./vja skill                          # ~/.agents/skills/vja/SKILL.md  (default)
+./vja skill --scope project          # ./.agents/skills/vja/SKILL.md  (current dir)
+./vja skill --force                  # overwrite an existing file
+./vja skill --dry-run                # preview the target path
+```
+
+`--scope global` (default) targets `~/.agents/skills/vja/SKILL.md`;
+`--scope project` targets `./.agents/skills/vja/SKILL.md`. An existing file is
+left untouched unless `--force` is given.
+
+
 ## Output Modes
 
 - `--json` (`-j`): print JSON to stdout.

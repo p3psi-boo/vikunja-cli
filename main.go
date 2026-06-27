@@ -1,6 +1,7 @@
 package main
 
 import (
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -14,8 +15,12 @@ var (
 	date    = "unknown"
 )
 
+//go:embed .agents/skills/managing-vikunja-tasks/SKILL.md
+var skillMarkdown string
+
 func main() {
 	cmd.SetBuildInfo(version, commit, date)
+	cmd.SetSkillContent(skillMarkdown)
 
 	if err := cmd.Execute(); err != nil {
 		exitCode := cmd.ExitCode(err)

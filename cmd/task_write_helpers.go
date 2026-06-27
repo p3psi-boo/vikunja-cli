@@ -46,30 +46,38 @@ func resolveProjectID(ctx context.Context, client *api.Client, raw string) (int6
 		return 0, err
 	}
 
-	var matchID int64
-	matches := 0
-	for _, project := range projects {
-		if project.ID <= 0 {
-			continue
-		}
+	needle := strings.ToLower(strings.TrimSpace(raw))
 
-		if strings.TrimSpace(project.Title) != raw {
-			continue
-		}
-
-		matchID = project.ID
-		matches++
+	// 1. case-insensitive exact match
+	if id, ok := uniqueMatch(projects, func(p model.Project) string { return p.Title }, needle, exact); ok {
+		return id, nil
 	}
 
-	if matches == 1 {
-		return matchID, nil
+	// 2. prefix match
+	if id, ok := uniqueMatch(projects, func(p model.Project) string { return p.Title }, needle, prefix); ok {
+		return id, nil
 	}
 
-	if matches > 1 {
-		return 0, fmt.Errorf("multiple projects found with title %q; use project ID", raw)
+	// 3. substring match
+	candidates := collectMatches(projects, func(p model.Project) string { return p.Title }, needle, substring)
+	if len(candidates) > 0 {
+		return 0, ambiguousProjectError(raw, candidates)
 	}
 
-	return 0, fmt.Errorf("project %q not found", raw)
+	return 0, fmt.Errorf("project %q not found. Run `vja project ls` to see available projects", raw)
+}
+
+type projectCandidate struct {
+	ID    int64
+	Title string
+}
+
+func ambiguousProjectError(raw string, candidates []projectCandidate) error {
+	listed := make([]string, 0, len(candidates))
+	for _, c := range candidates {
+		listed = append(listed, fmt.Sprintf("%s (%d)", c.Title, c.ID))
+	}
+	return fmt.Errorf("multiple projects match %q: %s. Use the ID", raw, strings.Join(listed, ", "))
 }
 
 func parseLabelIDs(ctx context.Context, client *api.Client, values []string) ([]int64, error) {
@@ -113,31 +121,114 @@ func parseLabelIDs(ctx context.Context, client *api.Client, values []string) ([]
 }
 
 func resolveLabelID(raw string, labels []model.Label) (int64, error) {
+	needle := strings.ToLower(strings.TrimSpace(raw))
+
+	if id, ok := uniqueLabelMatch(labels, needle, exact); ok {
+		return id, nil
+	}
+	if id, ok := uniqueLabelMatch(labels, needle, prefix); ok {
+		return id, nil
+	}
+
+	candidates := collectLabelMatches(labels, needle, substring)
+	if len(candidates) > 0 {
+		listed := make([]string, 0, len(candidates))
+		for _, c := range candidates {
+			listed = append(listed, fmt.Sprintf("%q (%d)", c.Title, c.ID))
+		}
+		return 0, fmt.Errorf("multiple labels match %q: %s. Use the ID", raw, strings.Join(listed, ", "))
+	}
+
+	return 0, fmt.Errorf("label %q not found. Run `vja label ls` to see available labels", raw)
+}
+
+type matchKind int
+
+const (
+	exact matchKind = iota
+	prefix
+	substring
+)
+
+func matchScore(haystack, needle string, kind matchKind) bool {
+	switch kind {
+	case exact:
+		return haystack == needle
+	case prefix:
+		return strings.HasPrefix(haystack, needle)
+	case substring:
+		return strings.Contains(haystack, needle)
+	}
+	return false
+}
+
+func normalized(s string) string {
+	return strings.ToLower(strings.TrimSpace(s))
+}
+
+// uniqueMatch returns the single project id that matches the needle under the
+// given matchKind (case-insensitive). It returns ok=false when there are zero
+// or multiple matches.
+func uniqueMatch(projects []model.Project, titleOf func(model.Project) string, needle string, kind matchKind) (int64, bool) {
 	var matchID int64
 	matches := 0
-
-	for _, label := range labels {
-		if label.ID <= 0 {
+	for _, p := range projects {
+		if p.ID <= 0 {
 			continue
 		}
-
-		if strings.TrimSpace(label.Title) != raw {
-			continue
+		if matchScore(normalized(titleOf(p)), needle, kind) {
+			matchID = p.ID
+			matches++
 		}
-
-		matchID = label.ID
-		matches++
 	}
-
 	if matches == 1 {
-		return matchID, nil
+		return matchID, true
 	}
+	return 0, false
+}
 
-	if matches > 1 {
-		return 0, fmt.Errorf("multiple labels found with title %q; use label ID", raw)
+func collectMatches(projects []model.Project, titleOf func(model.Project) string, needle string, kind matchKind) []projectCandidate {
+	var out []projectCandidate
+	for _, p := range projects {
+		if p.ID <= 0 {
+			continue
+		}
+		if matchScore(normalized(titleOf(p)), needle, kind) {
+			out = append(out, projectCandidate{ID: p.ID, Title: p.Title})
+		}
 	}
+	return out
+}
 
-	return 0, fmt.Errorf("label %q not found", raw)
+func uniqueLabelMatch(labels []model.Label, needle string, kind matchKind) (int64, bool) {
+	var matchID int64
+	matches := 0
+	for _, l := range labels {
+		if l.ID <= 0 {
+			continue
+		}
+		if matchScore(normalized(l.Title), needle, kind) {
+			matchID = l.ID
+			matches++
+		}
+	}
+	if matches == 1 {
+		return matchID, true
+	}
+	return 0, false
+}
+
+func collectLabelMatches(labels []model.Label, needle string, kind matchKind) []projectCandidate {
+	var out []projectCandidate
+	for _, l := range labels {
+		if l.ID <= 0 {
+			continue
+		}
+		if matchScore(normalized(l.Title), needle, kind) {
+			out = append(out, projectCandidate{ID: l.ID, Title: l.Title})
+		}
+	}
+	return out
 }
 
 func parseTaskDate(raw string) (model.NullableTime, error) {
@@ -261,14 +352,14 @@ func writeTaskOutput(cmd *cobra.Command, tasks []model.Task) error {
 			}
 		}
 
-		text := output.FormatKeyValues([]output.KeyValue{
+		text := output.FormatKeyValuesOmitEmpty([]output.KeyValue{
 			{Key: "ID", Value: strconv.FormatInt(task.ID, 10)},
 			{Key: "Title", Value: task.Title},
-			{Key: "Done", Value: strconv.FormatBool(task.Done)},
+			{Key: "Done", Value: formatBoolText(task.Done)},
 			{Key: "Due", Value: output.FormatDateText(task.DueDate, now)},
 			{Key: "Project", Value: strconv.FormatInt(task.ProjectID, 10)},
 			{Key: "Priority", Value: strconv.Itoa(task.Priority)},
-			{Key: "Favorite", Value: strconv.FormatBool(task.IsFavorite)},
+			{Key: "Favorite", Value: formatBoolText(task.IsFavorite)},
 		})
 
 		if _, err := fmt.Fprintln(cmd.OutOrStdout(), text); err != nil {
@@ -277,6 +368,15 @@ func writeTaskOutput(cmd *cobra.Command, tasks []model.Task) error {
 	}
 
 	return nil
+}
+
+// formatBoolText renders booleans for the compact write-back view: "yes"/""
+// so that the false case is omitted by FormatKeyValuesOmitEmpty.
+func formatBoolText(value bool) string {
+	if value {
+		return "yes"
+	}
+	return ""
 }
 
 func shiftFromNowIfPast(current model.NullableTime, now time.Time, delta time.Duration) model.NullableTime {

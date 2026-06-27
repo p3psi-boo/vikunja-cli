@@ -34,6 +34,10 @@ var labelListCmd = &cobra.Command{
 			return output.WriteJSONList(cmd.OutOrStdout(), labels)
 		}
 
+		if len(labels) == 0 {
+			return output.PrintInfo(cmd.OutOrStdout(), flagQuiet, "%s\n", output.EmptyMessage("labels", false))
+		}
+
 		_, err = fmt.Fprintln(cmd.OutOrStdout(), output.FormatLabelTable(labels))
 		return err
 	},

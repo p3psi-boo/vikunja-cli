@@ -34,6 +34,10 @@ var projectListCmd = &cobra.Command{
 			return output.WriteJSONList(cmd.OutOrStdout(), projects)
 		}
 
+		if len(projects) == 0 {
+			return output.PrintInfo(cmd.OutOrStdout(), flagQuiet, "%s\n", output.EmptyMessage("projects", false))
+		}
+
 		_, err = fmt.Fprintln(cmd.OutOrStdout(), output.FormatProjectTable(projects))
 		return err
 	},

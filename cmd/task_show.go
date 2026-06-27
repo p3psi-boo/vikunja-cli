@@ -22,13 +22,6 @@ var taskShowCmd = &cobra.Command{
 	RunE:  runTaskShow,
 }
 
-var taskShowAliasCmd = &cobra.Command{
-	Use:   "show <id...>",
-	Short: "Show one or more tasks",
-	Args:  cobra.MinimumNArgs(1),
-	RunE:  runTaskShow,
-}
-
 func runTaskShow(cmd *cobra.Command, args []string) error {
 	cfg, err := config.Load()
 	if err != nil {
@@ -70,23 +63,23 @@ func runTaskShow(cmd *cobra.Command, args []string) error {
 			}
 		}
 
-		body := output.FormatKeyValues([]output.KeyValue{
-			{Key: "ID", Value: fmt.Sprintf("%d", task.ID)},
+		header := output.Bold(fmt.Sprintf("── Task #%d ──", task.ID))
+		if _, err := fmt.Fprintln(cmd.OutOrStdout(), header); err != nil {
+			return err
+		}
+
+		body := output.FormatKeyValuesOmitEmpty([]output.KeyValue{
 			{Key: "Title", Value: task.Title},
 			{Key: "Description", Value: task.Description},
-			{Key: "Done", Value: strconv.FormatBool(task.Done)},
-			{Key: "Due", Value: output.FormatDateText(task.DueDate, now)},
-			{Key: "Project", Value: fmt.Sprintf("%d", task.ProjectID)},
-			{Key: "Priority", Value: fmt.Sprintf("%d", task.Priority)},
-			{Key: "Favorite", Value: strconv.FormatBool(task.IsFavorite)},
+			{Key: "Done", Value: formatBoolMark(task.Done)},
+			{Key: "Due", Value: output.FormatDateRich(task.DueDate, now)},
+			{Key: "Project", Value: strconv.FormatInt(task.ProjectID, 10)},
+			{Key: "Priority", Value: strconv.Itoa(task.Priority)},
+			{Key: "Favorite", Value: formatFavoriteMark(task.IsFavorite)},
 			{Key: "Labels", Value: joinTaskLabelTitles(task.Labels)},
 			{Key: "Created", Value: output.FormatDateText(task.Created, now)},
 			{Key: "Updated", Value: output.FormatDateText(task.Updated, now)},
 		})
-
-		if body == "" {
-			continue
-		}
 
 		if _, err := fmt.Fprintln(cmd.OutOrStdout(), body); err != nil {
 			return err
@@ -94,6 +87,23 @@ func runTaskShow(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+// formatBoolMark renders an affirmative boolean as a check, and an empty value
+// (so FormatKeyValuesOmitEmpty drops it) for the "false" case, keeping detail
+// views free of a wall of "false" rows.
+func formatBoolMark(value bool) string {
+	if value {
+		return output.CheckMark()
+	}
+	return ""
+}
+
+func formatFavoriteMark(value bool) string {
+	if value {
+		return output.FavoriteMark()
+	}
+	return ""
 }
 
 func joinTaskLabelTitles(labels []model.Label) string {

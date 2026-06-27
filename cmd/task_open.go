@@ -17,13 +17,6 @@ var taskOpenCmd = &cobra.Command{
 	RunE:  runTaskOpen,
 }
 
-var taskOpenAliasCmd = &cobra.Command{
-	Use:   "open [id...]",
-	Short: "Open tasks in the browser",
-	Args:  cobra.ArbitraryArgs,
-	RunE:  runTaskOpen,
-}
-
 func runTaskOpen(_ *cobra.Command, args []string) error {
 	cfg, err := config.Load()
 	if err != nil {

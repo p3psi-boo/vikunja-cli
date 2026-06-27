@@ -3,12 +3,15 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/p3psi-boo/vikunja-cli/api"
 	"github.com/p3psi-boo/vikunja-cli/config"
 	"github.com/p3psi-boo/vikunja-cli/model"
+	"github.com/p3psi-boo/vikunja-cli/output"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 var (
@@ -31,13 +34,6 @@ var taskEditCmd = &cobra.Command{
 	RunE:  runTaskEdit,
 }
 
-var taskEditAliasCmd = &cobra.Command{
-	Use:   "edit <id...>",
-	Short: "Edit one or more tasks",
-	Args:  cobra.MinimumNArgs(1),
-	RunE:  runTaskEdit,
-}
-
 func init() {
 	flags := taskEditCmd.Flags()
 	flags.StringVarP(&taskEditProject, "project", "p", "", "Target project ID or title")
@@ -53,12 +49,8 @@ func init() {
 	flags.BoolVar(&taskEditDone, "done", false, "Set done status")
 	flags.StringVar(&taskEditNoteAppend, "note-append", "", "Append text to the note")
 
-	taskEditAliasCmd.Flags().AddFlagSet(flags)
-
 	registerProjectFlagCompletion(taskEditCmd, "project")
-	registerProjectFlagCompletion(taskEditAliasCmd, "project")
 	registerLabelFlagCompletion(taskEditCmd, "label")
-	registerLabelFlagCompletion(taskEditAliasCmd, "label")
 }
 
 func runTaskEdit(cmd *cobra.Command, args []string) error {
@@ -174,6 +166,15 @@ func runTaskEdit(cmd *cobra.Command, args []string) error {
 			payload.LabelIDs = &taskLabels
 		}
 
+		if flagDryRun {
+			describe := describeEditChanges(cmd.Flags())
+			if err := output.PrintInfo(cmd.OutOrStdout(), flagQuiet, "[dry-run] would update task #%d: %s\n", id, describe); err != nil {
+				return err
+			}
+			updated = append(updated, task)
+			continue
+		}
+
 		newTask, err := client.UpdateTask(ctx, id, payload)
 		if err != nil {
 			return err
@@ -183,4 +184,47 @@ func runTaskEdit(cmd *cobra.Command, args []string) error {
 	}
 
 	return writeTaskOutput(cmd, updated)
+}
+
+// describeEditChanges produces a short human summary of the flags the user
+// passed to `vja edit`, for use in --dry-run previews.
+func describeEditChanges(flags *pflag.FlagSet) string {
+	var parts []string
+	add := func(name, value string) {
+		parts = append(parts, name+"="+value)
+	}
+	if flags.Changed("title") {
+		add("title", fmt.Sprintf("%q", taskEditTitle))
+	}
+	if flags.Changed("note") {
+		add("note", fmt.Sprintf("%q", taskEditNote))
+	}
+	if flags.Changed("note-append") {
+		add("note-append", fmt.Sprintf("%q", taskEditNoteAppend))
+	}
+	if flags.Changed("project") {
+		add("project", taskEditProject)
+	}
+	if flags.Changed("priority") || flags.Changed("prio") {
+		add("priority", strconv.Itoa(taskEditPriority))
+	}
+	if flags.Changed("due") {
+		add("due", taskEditDue)
+	}
+	if flags.Changed("reminder") {
+		add("reminder", taskEditReminder)
+	}
+	if flags.Changed("label") {
+		add("labels", fmt.Sprintf("%v", taskEditLabels))
+	}
+	if flags.Changed("favorite") {
+		add("favorite", strconv.FormatBool(taskEditFavorite))
+	}
+	if flags.Changed("done") {
+		add("done", strconv.FormatBool(taskEditDone))
+	}
+	if len(parts) == 0 {
+		return "no changes"
+	}
+	return strings.Join(parts, ", ")
 }

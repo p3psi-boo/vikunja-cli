@@ -8,6 +8,7 @@ import (
 	"github.com/p3psi-boo/vikunja-cli/api"
 	"github.com/p3psi-boo/vikunja-cli/config"
 	"github.com/p3psi-boo/vikunja-cli/model"
+	"github.com/p3psi-boo/vikunja-cli/output"
 	"github.com/spf13/cobra"
 )
 
@@ -28,13 +29,6 @@ var taskAddCmd = &cobra.Command{
 	RunE:  runTaskAdd,
 }
 
-var taskAddAliasCmd = &cobra.Command{
-	Use:   "add <title>",
-	Short: "Create a task",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runTaskAdd,
-}
-
 func init() {
 	flags := taskAddCmd.Flags()
 	flags.StringVarP(&taskAddProject, "project", "p", "", "Target project ID or title")
@@ -47,12 +41,8 @@ func init() {
 	flags.StringArrayVarP(&taskAddLabels, "label", "l", nil, "Label ID or title (repeatable)")
 	flags.BoolVarP(&taskAddFavorite, "favorite", "f", false, "Mark as favorite")
 
-	taskAddAliasCmd.Flags().AddFlagSet(flags)
-
 	registerProjectFlagCompletion(taskAddCmd, "project")
-	registerProjectFlagCompletion(taskAddAliasCmd, "project")
 	registerLabelFlagCompletion(taskAddCmd, "label")
-	registerLabelFlagCompletion(taskAddAliasCmd, "label")
 }
 
 func runTaskAdd(cmd *cobra.Command, args []string) error {
@@ -126,6 +116,10 @@ func runTaskAdd(cmd *cobra.Command, args []string) error {
 			return err
 		}
 		payload.Reminders = reminders
+	}
+
+	if flagDryRun {
+		return output.PrintInfo(cmd.OutOrStdout(), flagQuiet, "[dry-run] would create task %q in project #%d\n", payload.Title, projectID)
 	}
 
 	task, err := client.CreateTask(ctx, payload)

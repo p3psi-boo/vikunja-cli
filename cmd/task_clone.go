@@ -9,17 +9,11 @@ import (
 	"github.com/p3psi-boo/vikunja-cli/api"
 	"github.com/p3psi-boo/vikunja-cli/config"
 	"github.com/p3psi-boo/vikunja-cli/model"
+	"github.com/p3psi-boo/vikunja-cli/output"
 	"github.com/spf13/cobra"
 )
 
 var taskCloneCmd = &cobra.Command{
-	Use:   "clone <id> [title]",
-	Short: "Clone a task",
-	Args:  cobra.RangeArgs(1, 2),
-	RunE:  runTaskClone,
-}
-
-var taskCloneAliasCmd = &cobra.Command{
 	Use:   "clone <id> [title]",
 	Short: "Clone a task",
 	Args:  cobra.RangeArgs(1, 2),
@@ -75,6 +69,10 @@ func runTaskClone(cmd *cobra.Command, args []string) error {
 
 	favorite := task.IsFavorite
 	payload.IsFavorite = &favorite
+
+	if flagDryRun {
+		return output.PrintInfo(cmd.OutOrStdout(), flagQuiet, "[dry-run] would clone task #%d as %q in project #%d\n", id, title, projectID)
+	}
 
 	created, err := client.CreateTask(context.Background(), payload)
 	if err != nil {

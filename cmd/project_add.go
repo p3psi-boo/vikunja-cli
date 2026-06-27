@@ -43,6 +43,13 @@ var projectAddCmd = &cobra.Command{
 			payload.ParentProjectID = &parentID
 		}
 
+		if flagDryRun {
+			if payload.ParentProjectID != nil {
+				return output.PrintInfo(cmd.OutOrStdout(), flagQuiet, "[dry-run] would create project %q under #%d\n", payload.Title, *payload.ParentProjectID)
+			}
+			return output.PrintInfo(cmd.OutOrStdout(), flagQuiet, "[dry-run] would create project %q\n", payload.Title)
+		}
+
 		project, err := client.CreateProject(context.Background(), payload)
 		if err != nil {
 			return err

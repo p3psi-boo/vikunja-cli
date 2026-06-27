@@ -8,10 +8,14 @@ import (
 	"github.com/p3psi-boo/vikunja-cli/cmd"
 )
 
-var version = "dev"
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+)
 
 func main() {
-	cmd.SetVersion(version)
+	cmd.SetBuildInfo(version, commit, date)
 
 	if err := cmd.Execute(); err != nil {
 		exitCode := cmd.ExitCode(err)

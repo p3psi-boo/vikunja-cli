@@ -1,5 +1,5 @@
 ---
-name: managing-vikunja-tasks
+name: vja
 description: "Manages tasks, projects, and labels in Vikunja via the vja CLI. Use when asked to create, list, view, edit, complete, reopen, toggle, defer, clone, or delete tasks, manage projects, work with labels, or otherwise operate on a Vikunja instance from the shell."
 ---
 
@@ -141,7 +141,15 @@ vja project ls --json                              # list (alias: project list)
 vja project show 1 --json                          # details
 vja project add "Operations" --parent "Work" --json
 vja project open 1
+vja project use "Work"                             # pin default project for this repo (writes .vja.yaml)
+vja project use 1                                  # pin by id (no API call)
+vja project use --unset                            # clear the repo's default project
 ```
+
+`project use` is the easy way to set `defaults.project` for the current working
+directory (see *Configuration & Project-Local Defaults*). It accepts a project
+ID or title; titles are validated against the server (must match one project)
+before being stored. `--unset` removes the pin. Honors `--dry-run`/`-q`.
 
 ## Labels
 
@@ -172,7 +180,19 @@ Due dates and reminders accept flexible expressions (parsed via `olebedev/when`)
 `--json`/`-j`, `--quiet`/`-q`, `--verbose`/`-v`, `--color auto|always|never`
 (honors `NO_COLOR`; auto-disables when piped), `--dry-run` (preview writes without
 changing anything — works on `add`, `edit`, `clone`, `defer`, `done`/`undone`/`toggle`,
-`rm`, `project add`), `--version`.
+`rm`, `project add`, `project use`), `--version`.
+
+## Shell Completion
+
+`vja` ships cobra-generated completion for bash, zsh, and fish:
+
+```bash
+vja completion zsh > "${fpath[1]}/_vja"   # or bash/fish; see `vja completion --help`
+```
+
+Once installed, dynamic completions suggest: project IDs+titles for `--project`/`-p`
+and the `project use <project>` argument, label IDs+titles for `--label`/`-l`. These
+hit the live API on demand, so they require a configured token.
 
 ## Configuration & Project-Local Defaults
 
@@ -203,6 +223,10 @@ required for login state — `.vja.yaml` only overlays, it never replaces it.
 tree. If it sets `defaults.project`, omit `-p` (or you may double-resolve). If it
 sets `output.format: json`, output is already JSON even without `-j` — but pass `-j`
 explicitly anyway to be safe across repos.
+
+To pin the default project for the current repo, use `vja project use <project>`
+(ID or title; titles are validated against the server). Clear it with
+`vja project use --unset`.
 
 ## Workflow Recipes
 

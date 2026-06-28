@@ -101,6 +101,10 @@ output:
   format: json
 ```
 
+The easiest way to set `defaults.project` for the current working directory is
+`vja project use <project>` (ID or title). Titles are validated against the
+server before being stored. Use `vja project use --unset` to clear it again.
+
 Token file lookup order:
 
 1. `$VJA_CONFIG_DIR/token.json`

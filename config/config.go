@@ -38,7 +38,7 @@ type ServerConfig struct {
 }
 
 type DefaultsConfig struct {
-	Project ProjectRef `toml:"project" yaml:"project"`
+	Project ProjectRef `toml:"project,omitempty" yaml:"project"`
 }
 
 type ProjectRef struct {
@@ -48,6 +48,34 @@ type ProjectRef struct {
 
 func (p *ProjectRef) UnmarshalTOML(value any) error {
 	return p.assignFromValue(value)
+}
+
+// MarshalTOML serializes the reference back to a scalar (string name or integer
+// id) so that a config written by Save can be read back by Load. Without this,
+// reflection would serialize the struct as a TOML table that UnmarshalTOML then
+// rejects with "must be string or integer".
+//
+// The returned bytes are a raw TOML value written verbatim by the encoder, so
+// the name is quoted and the id is emitted as a bare integer. An unset
+// reference is handled by the "omitempty" struct tag on DefaultsConfig.Project,
+// not here: MarshalTOML must never return nil (the encoder panics on that).
+func (p ProjectRef) MarshalTOML() ([]byte, error) {
+	if p.ID != nil {
+		return []byte(strconv.FormatInt(*p.ID, 10)), nil
+	}
+	return []byte(`"` + p.Name + `"`), nil
+}
+
+// MarshalYAML mirrors MarshalTOML so a project reference round-trips through a
+// .vja.yaml file as a scalar: the name becomes a (possibly quoted) string and
+// the id becomes an integer. yaml.Marshal will error if we return a nil node,
+// so an unset reference relies on the "omitempty" struct tag upstream rather
+// than reaching this method.
+func (p ProjectRef) MarshalYAML() (any, error) {
+	if p.ID != nil {
+		return *p.ID, nil
+	}
+	return p.Name, nil
 }
 
 // UnmarshalYAML lets .vja.yaml set defaults.project as a string (project name)
@@ -191,6 +219,59 @@ func Save(cfg *Config, path string) error {
 
 	cfg.Path = path
 	return nil
+}
+
+// projectConfigFile is the YAML shape of a project-local .vja.yaml file. The
+// "omitempty" tags ensure only the sections actually set get written back, so
+// SaveProjectDefault can preserve the user's other overrides verbatim.
+type projectConfigFile struct {
+	Server   ServerConfig   `yaml:"server,omitempty"`
+	Defaults DefaultsConfig `yaml:"defaults,omitempty"`
+	Output   OutputConfig   `yaml:"output,omitempty"`
+}
+
+// ProjectConfigPath returns the path to the project-local override file in the
+// current working directory. It does not require the file to exist.
+func ProjectConfigPath() (string, error) {
+	dir, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("resolve working directory: %w", err)
+	}
+	return filepath.Join(dir, projectConfigName), nil
+}
+
+// SaveProjectDefault writes the given default project into the project-local
+// .vja.yaml in the current working directory, preserving any other fields that
+// are already present. Pass an unset ProjectRef to clear defaults.project
+// (the defaults section is omitted entirely when empty). It returns the path of
+// the file that was written.
+func SaveProjectDefault(project ProjectRef) (string, error) {
+	path, err := ProjectConfigPath()
+	if err != nil {
+		return "", err
+	}
+
+	var file projectConfigFile
+	if data, err := os.ReadFile(path); err == nil {
+		if err := yaml.Unmarshal(data, &file); err != nil {
+			return "", fmt.Errorf("parse project config %q: %w", path, err)
+		}
+	} else if !os.IsNotExist(err) {
+		return "", fmt.Errorf("read project config %q: %w", path, err)
+	}
+
+	file.Defaults.Project = project
+
+	out, err := yaml.Marshal(&file)
+	if err != nil {
+		return "", fmt.Errorf("encode project config %q: %w", path, err)
+	}
+
+	if err := os.WriteFile(path, out, 0o600); err != nil {
+		return "", fmt.Errorf("write project config %q: %w", path, err)
+	}
+
+	return path, nil
 }
 
 // findProjectConfig walks up from the current working directory looking for a

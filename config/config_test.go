@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -186,9 +187,11 @@ func TestLoad_ProjectPathNotRewritten(t *testing.T) {
 }
 
 func TestLoad_NoXDGConfigReturnsNotFound(t *testing.T) {
-	// XDG dir with no config file.
+	// XDG dir with no config file. Clear HOME and XDG_CONFIG_HOME too so the
+	// fallback candidates don't pick up a real config from the dev machine.
 	t.Setenv("VJA_CONFIG_DIR", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("HOME", t.TempDir())
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, ".vja.yaml"), []byte(
 		"server:\n  api_url: https://corp.example.com/api/v1\n",
@@ -222,4 +225,184 @@ func TestProjectRef_UnmarshalYAML_StringAndInt(t *testing.T) {
 			t.Fatalf("project = %+v", cfg.Defaults.Project)
 		}
 	})
+}
+
+// TestSave_LoadRoundTrip guards against a regression where ProjectRef was
+// serialized as a TOML table that could not be read back. Save must emit a
+// scalar (or omit the field) for every shape Load accepts.
+func TestSave_LoadRoundTrip(t *testing.T) {
+	cases := []struct {
+		name    string
+		project ProjectRef
+	}{
+		{name: "empty", project: ProjectRef{}},
+		{name: "name", project: ProjectRef{Name: "Inbox"}},
+		{name: "id", project: ProjectRef{ID: ptrInt64(7)}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			xdg := t.TempDir()
+			t.Setenv("VJA_CONFIG_DIR", xdg)
+			t.Setenv("XDG_CONFIG_HOME", "")
+
+			in := &Config{
+				Server:   ServerConfig{APIURL: "https://example.com/api/v1"},
+				Defaults: DefaultsConfig{Project: tc.project},
+			}
+			if err := Save(in, ""); err != nil {
+				t.Fatalf("Save: %v", err)
+			}
+
+			chdir(t, t.TempDir())
+			out, err := Load()
+			if err != nil {
+				t.Fatalf("Load after Save: %v", err)
+			}
+			if out.Defaults.Project.Name != tc.project.Name {
+				t.Fatalf("project name = %q, want %q", out.Defaults.Project.Name, tc.project.Name)
+			}
+			if (out.Defaults.Project.ID == nil) != (tc.project.ID == nil) {
+				t.Fatalf("project id = %v, want %v", out.Defaults.Project.ID, tc.project.ID)
+			}
+			if out.Defaults.Project.ID != nil && *out.Defaults.Project.ID != *tc.project.ID {
+				t.Fatalf("project id = %d, want %d", *out.Defaults.Project.ID, *tc.project.ID)
+			}
+		})
+	}
+}
+
+func ptrInt64(v int64) *int64 { return &v }
+
+func TestProjectRef_MarshalYAML_Scalar(t *testing.T) {
+	cases := []struct {
+		name    string
+		ref     ProjectRef
+		want    string
+	}{
+		{name: "name", ref: ProjectRef{Name: "Inbox"}, want: "Inbox\n"},
+		{name: "id", ref: ProjectRef{ID: ptrInt64(7)}, want: "7\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out, err := yaml.Marshal(tc.ref)
+			if err != nil {
+				t.Fatalf("marshal: %v", err)
+			}
+			if string(out) != tc.want {
+				t.Fatalf("marshal = %q, want %q", string(out), tc.want)
+			}
+
+			// Round-trip: what we write must parse back to the same reference.
+			var back ProjectRef
+			if err := yaml.Unmarshal(out, &back); err != nil {
+				t.Fatalf("unmarshal: %v", err)
+			}
+			if back.Name != tc.ref.Name {
+				t.Fatalf("name = %q, want %q", back.Name, tc.ref.Name)
+			}
+			if (back.ID == nil) != (tc.ref.ID == nil) {
+				t.Fatalf("id presence = %v, want %v", back.ID == nil, tc.ref.ID == nil)
+			}
+			if back.ID != nil && *back.ID != *tc.ref.ID {
+				t.Fatalf("id = %d, want %d", *back.ID, *tc.ref.ID)
+			}
+		})
+	}
+}
+
+func TestSaveProjectDefault_WritesAndLoads(t *testing.T) {
+	writeXDGConfig(t, xdgBase)
+	root := t.TempDir()
+	chdir(t, root)
+
+	if _, err := SaveProjectDefault(ProjectRef{Name: "work-project"}); err != nil {
+		t.Fatalf("SaveProjectDefault: %v", err)
+	}
+
+	// File exists in the CWD.
+	if _, err := os.Stat(filepath.Join(root, ".vja.yaml")); err != nil {
+		t.Fatalf("expected .vja.yaml: %v", err)
+	}
+
+	// Load picks up the override on top of the XDG config.
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Defaults.Project.Name != "work-project" {
+		t.Fatalf("project = %q, want work-project", cfg.Defaults.Project.Name)
+	}
+}
+
+func TestSaveProjectDefault_PreservesOtherFields(t *testing.T) {
+	writeXDGConfig(t, xdgBase)
+	root := t.TempDir()
+	existing := "server:\n  api_url: https://corp.example.com/api/v1\noutput:\n  format: json\n"
+	if err := os.WriteFile(filepath.Join(root, ".vja.yaml"), []byte(existing), 0o600); err != nil {
+		t.Fatalf("write project config: %v", err)
+	}
+	chdir(t, root)
+
+	if _, err := SaveProjectDefault(ProjectRef{Name: "work-project"}); err != nil {
+		t.Fatalf("SaveProjectDefault: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(root, ".vja.yaml"))
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	body := string(data)
+	if !strings.Contains(body, "https://corp.example.com/api/v1") {
+		t.Fatalf("server.api_url not preserved:\n%s", body)
+	}
+	if !strings.Contains(body, "format: json") {
+		t.Fatalf("output.format not preserved:\n%s", body)
+	}
+	if !strings.Contains(body, "work-project") {
+		t.Fatalf("project not written:\n%s", body)
+	}
+
+	// Load reflects the merged result.
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Server.APIURL != "https://corp.example.com/api/v1" {
+		t.Fatalf("api_url = %q", cfg.Server.APIURL)
+	}
+	if cfg.Defaults.Project.Name != "work-project" {
+		t.Fatalf("project = %q", cfg.Defaults.Project.Name)
+	}
+}
+
+func TestSaveProjectDefault_UnsetClearsProject(t *testing.T) {
+	writeXDGConfig(t, xdgBase)
+	root := t.TempDir()
+	existing := "defaults:\n  project: work-project\n"
+	if err := os.WriteFile(filepath.Join(root, ".vja.yaml"), []byte(existing), 0o600); err != nil {
+		t.Fatalf("write project config: %v", err)
+	}
+	chdir(t, root)
+
+	if _, err := SaveProjectDefault(ProjectRef{}); err != nil {
+		t.Fatalf("SaveProjectDefault unset: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(root, ".vja.yaml"))
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if strings.Contains(string(data), "project") {
+		t.Fatalf("expected project to be gone:\n%s", string(data))
+	}
+
+	// Load falls back to the XDG default.
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Defaults.Project.Name != "xdg-project" {
+		t.Fatalf("project = %q, want xdg-project fallback", cfg.Defaults.Project.Name)
+	}
 }
